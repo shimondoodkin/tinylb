@@ -33,7 +33,7 @@ fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "screenmcp_lb=info".into()),
+                .unwrap_or_else(|_| "tinylb=info".into()),
         )
         .init();
 
@@ -57,7 +57,7 @@ fn main() {
         bind = %initial_config.server.bind,
         routes = initial_config.routes.len(),
         tls = initial_config.server.tls_cert.is_some(),
-        "Starting screenmcp load balancer"
+        "Starting tinylb"
     );
 
     let rt = tokio::runtime::Builder::new_multi_thread()
