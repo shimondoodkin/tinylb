@@ -1,6 +1,6 @@
 services:
   lb:
-    image: ghcr.io/shimondoodkin/tinylb:0.1.0
+    image: doodkin/tinylb:0.1.0
     container_name: tinylb
     ports:
       - "8443:8443"

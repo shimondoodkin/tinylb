@@ -29,6 +29,15 @@ Grab the latest from [Releases](https://github.com/shimondoodkin/tinylb/releases
 | `tinylb-linux-x86_64-musl.tar.gz` | Alpine, scratch containers, or "I don't know the distro" — fully static |
 | `tinylb-windows-x86_64.zip` | Windows |
 
+### Docker
+
+```bash
+docker pull doodkin/tinylb:0.1.0
+docker run --rm -p 8080:8080 -v "$PWD/lb.toml:/etc/tinylb/lb.toml:ro" doodkin/tinylb:0.1.0
+```
+
+Image: [`doodkin/tinylb`](https://hub.docker.com/r/doodkin/tinylb) — Alpine-based, ~16 MB.
+
 ### Build from source
 
 ```bash

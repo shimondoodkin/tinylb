@@ -18,32 +18,22 @@ for i in 1 2 3 4 5 6; do curl -s http://localhost:8080/ | grep '^Hostname'; done
 
 Open `http://localhost:8080/_lb/` for the live stats dashboard.
 
-## If the published Docker image doesn't exist yet
+## Building the image from source
 
-Replace the `image:` line for the `lb` service with a build context pointing
-at your local tinylb checkout (and remove the `command:` since the binary
-path is then up to your Dockerfile):
+The compose file pulls `doodkin/tinylb:0.1.0` from Docker Hub. If you want
+to build the image from the current checkout (e.g. for a development
+version), replace the `image:` line with a build context pointing at the
+repo root:
 
 ```yaml
   lb:
     build:
-      context: ../../..      # path to the tinylb repo root
-      dockerfile: Dockerfile  # you'll need to add one — minimal example below
+      context: ../../..
+      # uses the Dockerfile at the repo root
 ```
 
-Minimal `Dockerfile`:
-
-```dockerfile
-FROM rust:1.78 AS build
-WORKDIR /app
-COPY . .
-RUN cargo build --release
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/target/release/tinylb /usr/local/bin/tinylb
-ENTRYPOINT ["/usr/local/bin/tinylb"]
-```
+The repo's `Dockerfile` is a multi-stage Alpine build that produces a
+~16 MB static-musl image.
 
 ## Clean up
 
