@@ -17,9 +17,17 @@ import time
 
 import toml
 
+# ─── ADJUST THESE FOR YOUR PROJECT ────────────────────────────────────────
+# Path to your lb.toml (relative to the cwd you run this script from).
 LB_TOML_PATH = "lb/lb.toml"
-LB_CONTAINER = "screenmcp-cloud-lb-1"
-COMPOSE_PROJECT = "screenmcp-cloud"
+# docker container_name of the tinylb container. `docker kill -s HUP <name>`
+# is what triggers a config reload.
+LB_CONTAINER = "tinylb"
+# docker compose project name — used to construct per-service container
+# names as f"{COMPOSE_PROJECT}-{service}-1" for healthcheck inspection.
+# Typically the folder name compose is run from.
+COMPOSE_PROJECT = "myproject"
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def log(msg: str) -> None:

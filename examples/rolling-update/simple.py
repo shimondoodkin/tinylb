@@ -1,30 +1,39 @@
 #!/usr/bin/env python3
-"""Rolling update for snapapi behind the Rust LB.
+"""Rolling update for a Node-based service behind tinylb (queue-aware draining).
 
-Builds the snapapi image once, then for each backend (snapapi-a, snapapi-b)
-in turn:
-  1. Flip its drain flag in lb/lb.toml + SIGHUP the LB (stops new traffic).
-  2. Brief grace pause for any request the LB just sent before the SIGHUP.
-  3. Poll the backend's /health.queue.active until it hits 0 (in-flight
-     requests have finished). Bail after --drain-timeout if it doesn't.
-  4. Recreate the container with the freshly-built image.
+Builds the image(s) once, then for each backend in TARGET_SERVICES in turn:
+  1. Flip its drain flag in lb.toml + SIGHUP tinylb (stops new traffic).
+  2. Brief grace pause for any request tinylb sent just before the SIGHUP.
+  3. Poll the backend's /health (expects JSON with .queue.active) until it
+     hits 0 — i.e. in-flight requests have actually finished. Bail after
+     --drain-timeout if it doesn't.
+  4. `docker compose up -d --no-deps --force-recreate <svc>` swaps the
+     container with the freshly-built image.
   5. Wait for the Docker healthcheck to flip to "healthy".
   6. Clear the drain flag + SIGHUP again.
 
 Polling queue.active means the script proceeds *as soon as* requests are
-actually done, instead of sleeping a fixed timeout — so a 2-second
-screenshot doesn't make the next swap wait 15 seconds for nothing, and a
-30-second screenshot doesn't get killed mid-flight by a too-short timeout.
+done, instead of sleeping a fixed timeout — so a 2-second request doesn't
+make the next swap wait 15 seconds for nothing, and a 30-second request
+doesn't get killed mid-flight by a too-short timeout.
 
 Failure semantics: if an instance fails its healthcheck within
 --startup-timeout, the script aborts WITH that instance still drained.
-Traffic continues on the surviving instance. Fix the issue and re-run;
+Traffic continues on the surviving instances. Fix the issue and re-run;
 the script auto-detects drained instances and recovers them first.
 
+Adapt to your stack:
+  - LB_CONTAINER, COMPOSE_PROJECT, TARGET_SERVICES (below)
+  - get_queue_active() runs a Node one-liner inside the container that
+    fetches localhost:3000/health. If your backend isn't Node, replace
+    that subprocess call with whatever queries your equivalent endpoint
+    (or delete the queue-poll path entirely and rely on --drain-timeout
+    as a fixed sleep, like the simpler examples).
+
 Usage:
-    python3 rolling-update.py                          # build + roll both
-    python3 rolling-update.py --no-build               # roll without rebuild
-    python3 rolling-update.py --drain-timeout 120      # raise max drain wait
+    python3 simple.py                          # build + roll all targets
+    python3 simple.py --no-build               # roll without rebuild
+    python3 simple.py --drain-timeout 120      # raise max drain wait
 
 Requires: pip install toml.
 """
@@ -37,10 +46,12 @@ import time
 
 import toml
 
+# ─── ADJUST THESE FOR YOUR PROJECT ────────────────────────────────────────
 LB_TOML_PATH = "lb/lb.toml"
-LB_CONTAINER = "snapapi"             # docker container_name of the LB
-COMPOSE_PROJECT = "snapapi"           # folder name => compose project name
-TARGET_SERVICES = ["snapapi-a", "snapapi-b"]
+LB_CONTAINER = "tinylb"                   # docker container_name of the LB
+COMPOSE_PROJECT = "myproject"             # docker compose project name
+TARGET_SERVICES = ["backend-a", "backend-b"]  # services to roll, in order
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def log(msg: str) -> None:
