@@ -1,0 +1,14 @@
+[server]
+bind = "0.0.0.0:8443"
+tls_cert = "./fullchain.pem"
+tls_key  = "./privkey.pem"
+
+[health]
+interval_secs = 10
+timeout_secs = 3
+unhealthy_cooldown_secs = 15
+
+[[routes]]
+host = "localhost"
+[[routes.backends]]
+url = "http://127.0.0.1:9000"
