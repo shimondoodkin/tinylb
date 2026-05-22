@@ -1,0 +1,25 @@
+services:
+  lb:
+    image: ghcr.io/shimondoodkin/tinylb:0.1.0
+    container_name: tinylb
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./lb.toml:/etc/tinylb/lb.toml:ro
+    command: ["/usr/local/bin/tinylb", "/etc/tinylb/lb.toml"]
+    depends_on:
+      - backend-a
+      - backend-b
+    restart: unless-stopped
+
+  backend-a:
+    image: traefik/whoami:v1.10
+    container_name: backend-a
+    command: ["--port=80", "--name=backend-a"]
+    restart: unless-stopped
+
+  backend-b:
+    image: traefik/whoami:v1.10
+    container_name: backend-b
+    command: ["--port=80", "--name=backend-b"]
+    restart: unless-stopped
