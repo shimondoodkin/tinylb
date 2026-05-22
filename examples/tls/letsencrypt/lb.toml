@@ -1,0 +1,14 @@
+[server]
+bind = "0.0.0.0:443"
+tls_cert = "/etc/letsencrypt/live/example.com/fullchain.pem"
+tls_key  = "/etc/letsencrypt/live/example.com/privkey.pem"
+
+[health]
+interval_secs = 10
+timeout_secs = 3
+unhealthy_cooldown_secs = 15
+
+[[routes]]
+host = "example.com"
+[[routes.backends]]
+url = "http://backend:80"

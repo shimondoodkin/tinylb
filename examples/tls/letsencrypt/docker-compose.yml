@@ -1,0 +1,35 @@
+services:
+  lb:
+    image: ghcr.io/shimondoodkin/tinylb:0.1.0
+    container_name: tinylb
+    ports:
+      - "80:80"          # certbot http-01 challenge
+      - "443:443"        # production HTTPS
+    volumes:
+      - ./lb.toml:/etc/tinylb/lb.toml:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    command: ["/usr/local/bin/tinylb", "/etc/tinylb/lb.toml"]
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: traefik/whoami:v1.10
+    container_name: backend
+    command: ["--port=80", "--name=backend"]
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot:v2.11.0
+    container_name: certbot
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - ./renew-hook.sh:/renew-hook.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Run renewal twice daily. The first run will be a no-op until you
+    # do `docker compose run --rm certbot certonly --webroot ...` (see README).
+    entrypoint: ["sh", "-c", "trap exit TERM; while :; do certbot renew --quiet --deploy-hook /renew-hook.sh; sleep 12h & wait $!; done"]
+    restart: unless-stopped
+
+volumes:
+  letsencrypt:
