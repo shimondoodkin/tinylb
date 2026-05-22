@@ -1,0 +1,21 @@
+[server]
+bind = "0.0.0.0:8080"
+
+[health]
+interval_secs = 10
+timeout_secs = 3
+unhealthy_cooldown_secs = 15
+
+[[routes]]
+host = "a.local"
+[[routes.backends]]
+url = "http://a1:80"
+[[routes.backends]]
+url = "http://a2:80"
+
+[[routes]]
+host = "b.local"
+[[routes.backends]]
+url = "http://b1:80"
+[[routes.backends]]
+url = "http://b2:80"

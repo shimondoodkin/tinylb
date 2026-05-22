@@ -1,0 +1,20 @@
+services:
+  lb:
+    image: ghcr.io/shimondoodkin/tinylb:0.1.0
+    container_name: tinylb
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./lb.toml:/etc/tinylb/lb.toml:ro
+    command: ["/usr/local/bin/tinylb", "/etc/tinylb/lb.toml"]
+    depends_on:
+      - a1
+      - a2
+      - b1
+      - b2
+    restart: unless-stopped
+
+  a1: { image: traefik/whoami:v1.10, command: ["--port=80", "--name=a1"], restart: unless-stopped }
+  a2: { image: traefik/whoami:v1.10, command: ["--port=80", "--name=a2"], restart: unless-stopped }
+  b1: { image: traefik/whoami:v1.10, command: ["--port=80", "--name=b1"], restart: unless-stopped }
+  b2: { image: traefik/whoami:v1.10, command: ["--port=80", "--name=b2"], restart: unless-stopped }
