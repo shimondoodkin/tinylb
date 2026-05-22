@@ -112,7 +112,7 @@ pub fn dashboard_html() -> &'static str {
     r#"<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
-<title>LB Stats</title>
+<title>tinylb stats</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 <style>
@@ -121,7 +121,7 @@ pub fn dashboard_html() -> &'static str {
   canvas { max-width: 100%; background: #16213e; border-radius: 8px; padding: 10px; margin-bottom: 30px; }
 </style>
 </head><body>
-<h1>LB Stats</h1>
+<h1>tinylb stats</h1>
 <h2>Active Connections</h2>
 <canvas id="connChart"></canvas>
 <h2>Errors per Minute</h2>
