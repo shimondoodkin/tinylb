@@ -1,7 +1,14 @@
 [package]
-name = "screenmcp-lb"
+name = "tinylb"
 version = "0.1.0"
 edition = "2021"
+description = "Tiny, hot-reloadable HTTP + WebSocket reverse proxy with TLS, least-connections routing, and drain mode for zero-downtime deploys."
+license = "MIT"
+repository = "https://github.com/shimondoodkin/tinylb"
+homepage = "https://github.com/shimondoodkin/tinylb"
+keywords = ["load-balancer", "reverse-proxy", "websocket", "tls", "http"]
+categories = ["network-programming", "web-programming::http-server"]
+readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

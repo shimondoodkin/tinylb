@@ -992,29 +992,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "screenmcp-lb"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "bytes",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "reqwest",
- "rustls",
- "rustls-pemfile",
- "serde",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
- "toml",
- "tracing",
- "tracing-subscriber",
- "tungstenite",
-]
-
-[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1226,6 +1203,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "tinylb"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "reqwest",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "tungstenite",
 ]
 
 [[package]]
