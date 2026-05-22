@@ -19,7 +19,6 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpListener;
-use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, warn};
@@ -526,6 +525,28 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+/// Future that resolves whenever a SIGHUP arrives on Unix.
+/// On non-Unix targets this returns a future that never resolves, so the
+/// `tokio::select!` in the reload loop effectively only watches the file
+/// mtime poll on those platforms.
+#[cfg(unix)]
+async fn wait_sighup() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut s = match signal(SignalKind::hangup()) {
+        Ok(s) => s,
+        Err(_) => {
+            std::future::pending::<()>().await;
+            return;
+        }
+    };
+    s.recv().await;
+}
+
+#[cfg(not(unix))]
+async fn wait_sighup() {
+    std::future::pending::<()>().await;
+}
+
 /// Reload config when triggered by SIGHUP or when the config file changes (polled every 10s).
 async fn config_reload_loop(
     config_path: &Path,
@@ -533,8 +554,6 @@ async fn config_reload_loop(
     _health_tx: &watch::Sender<config::HealthConfig>,
     tls_resolver: Option<&ReloadableCertResolver>,
 ) {
-    let mut sighup = signal(SignalKind::hangup()).ok();
-
     // Track last known modification time
     let mut last_modified = std::fs::metadata(config_path)
         .and_then(|m| m.modified())
@@ -556,12 +575,7 @@ async fn config_reload_loop(
                 last_modified = current_modified;
                 "config file changed"
             }
-            _ = async {
-                match sighup.as_mut() {
-                    Some(s) => s.recv().await,
-                    None => std::future::pending().await,
-                }
-            } => {
+            _ = wait_sighup() => {
                 // Update last_modified so we don't double-reload on next poll tick
                 last_modified = std::fs::metadata(config_path)
                     .and_then(|m| m.modified())
