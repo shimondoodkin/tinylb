@@ -1,0 +1,62 @@
+[[routes]]
+host = "screenmcp.com"
+[[routes.backends]]
+url = "http://web1:3000"
+max_connections = 5000
+drain = false
+
+[[routes.backends]]
+url = "http://web2:3000"
+max_connections = 5000
+drain = false
+
+
+[[routes]]
+host = "mcp.screenmcp.com"
+[[routes.backends]]
+url = "http://mcp-server:3001"
+max_connections = 5000
+
+
+[[routes]]
+host = "api.screenmcp.com"
+[[routes.backends]]
+url = "http://api-server:3002"
+max_connections = 5000
+drain = false
+
+[[routes.backends]]
+url = "http://api-server2:3002"
+max_connections = 5000
+drain = false
+
+
+[[routes]]
+host = "installai.doodkin.com"
+[[routes.backends]]
+url = "http://installai-web:80"
+max_connections = 5000
+
+
+[[routes]]
+host = "worker0.screenmcp.com"
+[[routes.backends]]
+url = "http://worker:8080"
+max_connections = 5000
+drain = false
+
+[[routes.backends]]
+url = "http://worker2:8080"
+max_connections = 5000
+drain = false
+
+
+[server]
+bind = "0.0.0.0:443"
+tls_cert = "/certs/fullchain.pem"
+tls_key = "/certs/privkey.pem"
+
+[health]
+interval_secs = 10
+timeout_secs = 3
+unhealthy_cooldown_secs = 15
