@@ -1,62 +1,51 @@
-[[routes]]
-host = "screenmcp.com"
-[[routes.backends]]
-url = "http://web1:3000"
-max_connections = 5000
-drain = false
-
-[[routes.backends]]
-url = "http://web2:3000"
-max_connections = 5000
-drain = false
-
-
-[[routes]]
-host = "mcp.screenmcp.com"
-[[routes.backends]]
-url = "http://mcp-server:3001"
-max_connections = 5000
-
-
-[[routes]]
-host = "api.screenmcp.com"
-[[routes.backends]]
-url = "http://api-server:3002"
-max_connections = 5000
-drain = false
-
-[[routes.backends]]
-url = "http://api-server2:3002"
-max_connections = 5000
-drain = false
-
-
-[[routes]]
-host = "installai.doodkin.com"
-[[routes.backends]]
-url = "http://installai-web:80"
-max_connections = 5000
-
-
-[[routes]]
-host = "worker0.screenmcp.com"
-[[routes.backends]]
-url = "http://worker:8080"
-max_connections = 5000
-drain = false
-
-[[routes.backends]]
-url = "http://worker2:8080"
-max_connections = 5000
-drain = false
-
+# tinylb configuration
+# ====================
+# Reload this file by sending SIGHUP to the tinylb process, or just
+# save it — tinylb polls the file every 10 seconds and reloads on
+# mtime change (this is the only reload mechanism on Windows).
+#
+# What reloads live: backends, drain flags, max_connections, TLS certs.
+# What requires a restart: server.bind, server.tls_cert/tls_key paths.
 
 [server]
-bind = "0.0.0.0:443"
-tls_cert = "/certs/fullchain.pem"
-tls_key = "/certs/privkey.pem"
+# TCP listen address. Required.
+bind = "0.0.0.0:8080"
+
+# TLS cert + key paths (PEM). Both must be set, or omit both for plaintext.
+# tinylb hot-reloads the cert files on every config reload, so renewals
+# are picked up without dropping existing connections.
+# tls_cert = "/etc/letsencrypt/live/example.com/fullchain.pem"
+# tls_key  = "/etc/letsencrypt/live/example.com/privkey.pem"
 
 [health]
+# How often to health-check each backend (HTTP GET to the backend root).
 interval_secs = 10
+# HTTP timeout per health-check request.
 timeout_secs = 3
+# After a backend is marked unhealthy, wait this long before retrying.
 unhealthy_cooldown_secs = 15
+
+# One [[routes]] block per Host header you want to handle.
+# Requests whose Host header doesn't match any route get 404.
+
+[[routes]]
+host = "example.com"
+[[routes.backends]]
+url = "http://backend-a:8080"
+max_connections = 5000      # default: 5000
+drain = false               # set true to stop routing new conns here
+
+[[routes.backends]]
+url = "http://backend-b:8080"
+max_connections = 5000
+drain = false
+
+# Another route. Both HTTP and WebSocket are handled — the same route
+# block works for ws:// backends too. Use http:// in the URL; tinylb
+# will upgrade to WebSocket when the incoming request has the upgrade
+# headers.
+#
+# [[routes]]
+# host = "api.example.com"
+# [[routes.backends]]
+# url = "http://api-backend:3000"
