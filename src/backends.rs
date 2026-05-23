@@ -58,6 +58,45 @@ impl std::fmt::Debug for Backend {
     }
 }
 
+/// How an incoming Host header is matched against a route.
+#[derive(Debug, Clone)]
+pub enum HostMatch {
+    /// Exact host match, stored lowercased.
+    Exact(String),
+    /// Wildcard suffix including the leading dot, stored lowercased.
+    /// E.g. config host `*.example.com` → suffix `.example.com`.
+    Wildcard { suffix: String },
+}
+
+impl HostMatch {
+    /// Parse a `host` config value into a `HostMatch`.
+    /// Leading `*.` becomes a wildcard; anything else is exact.
+    /// Returns an error string for invalid wildcards.
+    pub fn parse(host: &str) -> Result<Self, String> {
+        if let Some(rest) = host.strip_prefix("*.") {
+            if rest.is_empty() {
+                return Err(format!("invalid wildcard host {:?}: suffix is empty", host));
+            }
+            if rest.contains('*') {
+                return Err(format!(
+                    "invalid wildcard host {:?}: only a single leading '*.' is allowed",
+                    host
+                ));
+            }
+            Ok(HostMatch::Wildcard {
+                suffix: format!(".{}", rest).to_ascii_lowercase(),
+            })
+        } else if host.contains('*') {
+            Err(format!(
+                "invalid host {:?}: '*' is only allowed as a leading '*.' wildcard",
+                host
+            ))
+        } else {
+            Ok(HostMatch::Exact(host.to_ascii_lowercase()))
+        }
+    }
+}
+
 /// A group of backends for a specific host route.
 pub struct BackendGroup {
     pub host: String,
@@ -230,6 +269,55 @@ impl Drop for ConnectionGuard {
 }
 
 /// Run periodic health checks against all backends in all groups.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_exact_host() {
+        let m = HostMatch::parse("example.com").unwrap();
+        assert!(matches!(m, HostMatch::Exact(ref s) if s == "example.com"));
+    }
+
+    #[test]
+    fn parse_exact_lowercases() {
+        let m = HostMatch::parse("Example.COM").unwrap();
+        assert!(matches!(m, HostMatch::Exact(ref s) if s == "example.com"));
+    }
+
+    #[test]
+    fn parse_wildcard_stores_suffix_with_leading_dot() {
+        let m = HostMatch::parse("*.example.com").unwrap();
+        assert!(matches!(m, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
+    }
+
+    #[test]
+    fn parse_wildcard_lowercases_suffix() {
+        let m = HostMatch::parse("*.Example.COM").unwrap();
+        assert!(matches!(m, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
+    }
+
+    #[test]
+    fn parse_rejects_bare_star() {
+        assert!(HostMatch::parse("*").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_star_dot_empty() {
+        assert!(HostMatch::parse("*.").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_mid_label_wildcard() {
+        assert!(HostMatch::parse("api.*.example.com").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_partial_label_wildcard() {
+        assert!(HostMatch::parse("foo*.example.com").is_err());
+    }
+}
+
 pub async fn health_check_loop(registry: Arc<BackendRegistry>, health_config: HealthConfig) {
     let interval = Duration::from_secs(health_config.interval_secs);
     let timeout = Duration::from_secs(health_config.timeout_secs);
