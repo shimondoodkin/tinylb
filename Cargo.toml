@@ -1,6 +1,6 @@
 [package]
 name = "tinylb"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Tiny, hot-reloadable HTTP + WebSocket reverse proxy with TLS, least-connections routing, and drain mode for zero-downtime deploys."
 license = "MIT"

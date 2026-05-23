@@ -68,7 +68,10 @@ fn main() {
 }
 
 async fn run(initial_config: LbConfig, config_path: PathBuf) {
-    let registry = Arc::new(BackendRegistry::new(&initial_config.routes));
+    let registry = Arc::new(
+        BackendRegistry::new(&initial_config.routes)
+            .expect("Invalid route configuration at startup"),
+    );
 
     let (health_tx, _health_rx) = watch::channel(initial_config.health.clone());
 
@@ -587,7 +590,9 @@ async fn config_reload_loop(
         info!("Reloading configuration ({})", reason);
 
         if let Some(new_config) = config::reload_config(config_path) {
-            registry.apply_config(&new_config.routes);
+            if let Err(e) = registry.apply_config(&new_config.routes) {
+                error!(error = %e, "Failed to apply new route configuration; keeping previous");
+            }
 
             // Reload TLS certs if configured
             if let Some(resolver) = tls_resolver {

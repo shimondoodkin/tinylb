@@ -58,23 +58,65 @@ impl std::fmt::Debug for Backend {
     }
 }
 
+/// How an incoming Host header is matched against a route.
+#[derive(Debug, Clone)]
+pub enum HostMatch {
+    /// Exact host match, stored lowercased.
+    Exact(String),
+    /// Wildcard suffix including the leading dot, stored lowercased.
+    /// E.g. config host `*.example.com` → suffix `.example.com`.
+    Wildcard { suffix: String },
+}
+
+impl HostMatch {
+    /// Parse a `host` config value into a `HostMatch`.
+    /// Leading `*.` becomes a wildcard; anything else is exact.
+    /// Returns an error string for invalid wildcards.
+    pub fn parse(host: &str) -> Result<Self, String> {
+        if let Some(rest) = host.strip_prefix("*.") {
+            if rest.is_empty() {
+                return Err(format!("invalid wildcard host {:?}: suffix is empty", host));
+            }
+            if rest.contains('*') {
+                return Err(format!(
+                    "invalid wildcard host {:?}: only a single leading '*.' is allowed",
+                    host
+                ));
+            }
+            Ok(HostMatch::Wildcard {
+                suffix: format!(".{}", rest).to_ascii_lowercase(),
+            })
+        } else if host.contains('*') {
+            Err(format!(
+                "invalid host {:?}: '*' is only allowed as a leading '*.' wildcard",
+                host
+            ))
+        } else {
+            Ok(HostMatch::Exact(host.to_ascii_lowercase()))
+        }
+    }
+}
+
 /// A group of backends for a specific host route.
 pub struct BackendGroup {
     pub host: String,
+    pub match_kind: HostMatch,
     pub backends: RwLock<Vec<Arc<Backend>>>,
 }
 
 impl BackendGroup {
-    pub fn new(route: &RouteConfig) -> Self {
+    pub fn new(route: &RouteConfig) -> Result<Self, String> {
+        let match_kind = HostMatch::parse(&route.host)?;
         let backends = route
             .backends
             .iter()
             .map(|c| Arc::new(Backend::new(c)))
             .collect();
-        Self {
+        Ok(Self {
             host: route.host.clone(),
+            match_kind,
             backends: RwLock::new(backends),
-        }
+        })
     }
 
     /// Select the healthiest backend with the fewest active connections.
@@ -154,27 +196,55 @@ pub struct BackendRegistry {
 }
 
 impl BackendRegistry {
-    pub fn new(routes: &[RouteConfig]) -> Self {
-        let groups = routes
-            .iter()
-            .map(|r| Arc::new(BackendGroup::new(r)))
-            .collect();
-        Self {
-            groups: RwLock::new(groups),
+    pub fn new(routes: &[RouteConfig]) -> Result<Self, String> {
+        let mut groups = Vec::with_capacity(routes.len());
+        for r in routes {
+            groups.push(Arc::new(BackendGroup::new(r)?));
         }
+        Ok(Self {
+            groups: RwLock::new(groups),
+        })
     }
 
     /// Find a backend group by Host header value (strips port if present).
+    /// Tries exact match first, then falls back to the longest-suffix wildcard.
     pub fn find_group(&self, host: &str) -> Option<Arc<BackendGroup>> {
-        let host = host.split(':').next().unwrap_or(host);
+        let host = host
+            .split(':')
+            .next()
+            .unwrap_or(host)
+            .to_ascii_lowercase();
         let groups = self.groups.read().unwrap();
-        groups.iter().find(|g| g.host == host).cloned()
+
+        // 1. Exact match wins.
+        if let Some(g) = groups.iter().find(|g| match &g.match_kind {
+            HostMatch::Exact(h) => h == &host,
+            _ => false,
+        }) {
+            return Some(g.clone());
+        }
+
+        // 2. Longest-suffix wildcard match.
+        groups
+            .iter()
+            .filter_map(|g| match &g.match_kind {
+                HostMatch::Wildcard { suffix } if host.ends_with(suffix.as_str()) => {
+                    Some((suffix.len(), g))
+                }
+                _ => None,
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, g)| Arc::clone(g))
     }
 
     /// Apply a new configuration with routes.
-    pub fn apply_config(&self, routes: &[RouteConfig]) {
-        let mut groups = self.groups.write().unwrap();
+    pub fn apply_config(&self, routes: &[RouteConfig]) -> Result<(), String> {
+        // Validate all routes up-front so a bad config doesn't half-apply.
+        for r in routes {
+            HostMatch::parse(&r.host)?;
+        }
 
+        let mut groups = self.groups.write().unwrap();
         let mut new_groups: Vec<Arc<BackendGroup>> = Vec::with_capacity(routes.len());
 
         for route in routes {
@@ -183,7 +253,8 @@ impl BackendRegistry {
                 existing.apply_backends(&route.backends);
                 new_groups.push(Arc::clone(existing));
             } else {
-                let group = Arc::new(BackendGroup::new(route));
+                // Safe to unwrap: we validated above.
+                let group = Arc::new(BackendGroup::new(route).unwrap());
                 info!(host = %route.host, "Added new route");
                 new_groups.push(group);
             }
@@ -196,6 +267,7 @@ impl BackendRegistry {
         }
 
         *groups = new_groups;
+        Ok(())
     }
 }
 
@@ -230,6 +302,167 @@ impl Drop for ConnectionGuard {
 }
 
 /// Run periodic health checks against all backends in all groups.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn route(host: &str) -> RouteConfig {
+        RouteConfig {
+            host: host.to_string(),
+            backends: vec![],
+        }
+    }
+
+    fn registry(hosts: &[&str]) -> BackendRegistry {
+        let routes: Vec<RouteConfig> = hosts.iter().map(|h| route(h)).collect();
+        BackendRegistry::new(&routes).unwrap()
+    }
+
+    #[test]
+    fn parse_exact_host() {
+        let m = HostMatch::parse("example.com").unwrap();
+        assert!(matches!(m, HostMatch::Exact(ref s) if s == "example.com"));
+    }
+
+    #[test]
+    fn parse_exact_lowercases() {
+        let m = HostMatch::parse("Example.COM").unwrap();
+        assert!(matches!(m, HostMatch::Exact(ref s) if s == "example.com"));
+    }
+
+    #[test]
+    fn parse_wildcard_stores_suffix_with_leading_dot() {
+        let m = HostMatch::parse("*.example.com").unwrap();
+        assert!(matches!(m, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
+    }
+
+    #[test]
+    fn parse_wildcard_lowercases_suffix() {
+        let m = HostMatch::parse("*.Example.COM").unwrap();
+        assert!(matches!(m, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
+    }
+
+    #[test]
+    fn parse_rejects_bare_star() {
+        assert!(HostMatch::parse("*").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_star_dot_empty() {
+        assert!(HostMatch::parse("*.").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_mid_label_wildcard() {
+        assert!(HostMatch::parse("api.*.example.com").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_partial_label_wildcard() {
+        assert!(HostMatch::parse("foo*.example.com").is_err());
+    }
+
+    #[test]
+    fn backend_group_new_propagates_invalid_wildcard() {
+        let route = RouteConfig {
+            host: "api.*.example.com".to_string(),
+            backends: vec![],
+        };
+        assert!(BackendGroup::new(&route).is_err());
+    }
+
+    #[test]
+    fn backend_group_new_accepts_wildcard() {
+        let route = RouteConfig {
+            host: "*.example.com".to_string(),
+            backends: vec![],
+        };
+        let g = BackendGroup::new(&route).unwrap();
+        assert!(matches!(g.match_kind, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
+    }
+
+    #[test]
+    fn find_exact_match() {
+        let r = registry(&["example.com"]);
+        assert_eq!(r.find_group("example.com").unwrap().host, "example.com");
+    }
+
+    #[test]
+    fn find_exact_match_strips_port() {
+        let r = registry(&["example.com"]);
+        assert_eq!(r.find_group("example.com:8443").unwrap().host, "example.com");
+    }
+
+    #[test]
+    fn find_exact_match_is_case_insensitive() {
+        let r = registry(&["example.com"]);
+        assert_eq!(r.find_group("Example.COM").unwrap().host, "example.com");
+    }
+
+    #[test]
+    fn find_no_match_returns_none() {
+        let r = registry(&["example.com"]);
+        assert!(r.find_group("other.com").is_none());
+    }
+
+    #[test]
+    fn wildcard_matches_single_label_subdomain() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(r.find_group("foo.example.com").unwrap().host, "*.example.com");
+    }
+
+    #[test]
+    fn wildcard_matches_multi_label_subdomain() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(r.find_group("a.b.example.com").unwrap().host, "*.example.com");
+    }
+
+    #[test]
+    fn wildcard_does_not_match_apex() {
+        let r = registry(&["*.example.com"]);
+        assert!(r.find_group("example.com").is_none());
+    }
+
+    #[test]
+    fn wildcard_does_not_match_suffix_without_dot_boundary() {
+        let r = registry(&["*.example.com"]);
+        assert!(r.find_group("notexample.com").is_none());
+    }
+
+    #[test]
+    fn exact_wins_over_wildcard() {
+        let r = registry(&["*.example.com", "foo.example.com"]);
+        assert_eq!(r.find_group("foo.example.com").unwrap().host, "foo.example.com");
+    }
+
+    #[test]
+    fn longest_suffix_wildcard_wins() {
+        let r = registry(&["*.example.com", "*.api.example.com"]);
+        assert_eq!(
+            r.find_group("x.api.example.com").unwrap().host,
+            "*.api.example.com"
+        );
+    }
+
+    #[test]
+    fn wildcard_match_is_case_insensitive() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(
+            r.find_group("Foo.Example.COM").unwrap().host,
+            "*.example.com"
+        );
+    }
+
+    #[test]
+    fn wildcard_match_strips_port() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(
+            r.find_group("foo.example.com:8443").unwrap().host,
+            "*.example.com"
+        );
+    }
+}
+
 pub async fn health_check_loop(registry: Arc<BackendRegistry>, health_config: HealthConfig) {
     let interval = Duration::from_secs(health_config.interval_secs);
     let timeout = Duration::from_secs(health_config.timeout_secs);
