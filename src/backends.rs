@@ -100,20 +100,23 @@ impl HostMatch {
 /// A group of backends for a specific host route.
 pub struct BackendGroup {
     pub host: String,
+    pub match_kind: HostMatch,
     pub backends: RwLock<Vec<Arc<Backend>>>,
 }
 
 impl BackendGroup {
-    pub fn new(route: &RouteConfig) -> Self {
+    pub fn new(route: &RouteConfig) -> Result<Self, String> {
+        let match_kind = HostMatch::parse(&route.host)?;
         let backends = route
             .backends
             .iter()
             .map(|c| Arc::new(Backend::new(c)))
             .collect();
-        Self {
+        Ok(Self {
             host: route.host.clone(),
+            match_kind,
             backends: RwLock::new(backends),
-        }
+        })
     }
 
     /// Select the healthiest backend with the fewest active connections.
@@ -193,14 +196,14 @@ pub struct BackendRegistry {
 }
 
 impl BackendRegistry {
-    pub fn new(routes: &[RouteConfig]) -> Self {
-        let groups = routes
-            .iter()
-            .map(|r| Arc::new(BackendGroup::new(r)))
-            .collect();
-        Self {
-            groups: RwLock::new(groups),
+    pub fn new(routes: &[RouteConfig]) -> Result<Self, String> {
+        let mut groups = Vec::with_capacity(routes.len());
+        for r in routes {
+            groups.push(Arc::new(BackendGroup::new(r)?));
         }
+        Ok(Self {
+            groups: RwLock::new(groups),
+        })
     }
 
     /// Find a backend group by Host header value (strips port if present).
@@ -211,9 +214,13 @@ impl BackendRegistry {
     }
 
     /// Apply a new configuration with routes.
-    pub fn apply_config(&self, routes: &[RouteConfig]) {
-        let mut groups = self.groups.write().unwrap();
+    pub fn apply_config(&self, routes: &[RouteConfig]) -> Result<(), String> {
+        // Validate all routes up-front so a bad config doesn't half-apply.
+        for r in routes {
+            HostMatch::parse(&r.host)?;
+        }
 
+        let mut groups = self.groups.write().unwrap();
         let mut new_groups: Vec<Arc<BackendGroup>> = Vec::with_capacity(routes.len());
 
         for route in routes {
@@ -222,7 +229,8 @@ impl BackendRegistry {
                 existing.apply_backends(&route.backends);
                 new_groups.push(Arc::clone(existing));
             } else {
-                let group = Arc::new(BackendGroup::new(route));
+                // Safe to unwrap: we validated above.
+                let group = Arc::new(BackendGroup::new(route).unwrap());
                 info!(host = %route.host, "Added new route");
                 new_groups.push(group);
             }
@@ -235,6 +243,7 @@ impl BackendRegistry {
         }
 
         *groups = new_groups;
+        Ok(())
     }
 }
 
@@ -315,6 +324,25 @@ mod tests {
     #[test]
     fn parse_rejects_partial_label_wildcard() {
         assert!(HostMatch::parse("foo*.example.com").is_err());
+    }
+
+    #[test]
+    fn backend_group_new_propagates_invalid_wildcard() {
+        let route = RouteConfig {
+            host: "api.*.example.com".to_string(),
+            backends: vec![],
+        };
+        assert!(BackendGroup::new(&route).is_err());
+    }
+
+    #[test]
+    fn backend_group_new_accepts_wildcard() {
+        let route = RouteConfig {
+            host: "*.example.com".to_string(),
+            backends: vec![],
+        };
+        let g = BackendGroup::new(&route).unwrap();
+        assert!(matches!(g.match_kind, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
     }
 }
 
