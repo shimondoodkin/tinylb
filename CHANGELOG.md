@@ -6,6 +6,18 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-23
+
+### Added
+- Wildcard subdomain routing: `[[routes]].host` may start with `*.` to match
+  any subdomain (one or more sub-labels). E.g. `*.example.com` matches
+  `foo.example.com` and `a.b.example.com` but not the bare apex `example.com`.
+- Exact-host routes always win over wildcards; among wildcards, the longest
+  literal suffix wins. Host matching is case-insensitive.
+- Bad wildcard syntax in the config (e.g. `api.*.example.com`) now fails
+  startup with a clear error; on reload, the bad config is rejected and the
+  previous routing table stays live.
+
 ## [0.1.0] — 2026-05-22
 
 Initial public release. Source extracted from screenmcp-cloud/snapapi
@@ -23,5 +35,6 @@ where it has been running in production for several months.
 - Stats JSON endpoint at `/_lb/stats` and HTML dashboard at `/_lb/`.
 - Release binaries for Linux x86_64 (glibc and static-musl) and Windows x86_64.
 
-[Unreleased]: https://github.com/shimondoodkin/tinylb/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/shimondoodkin/tinylb/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/shimondoodkin/tinylb/releases/tag/v0.2.0
 [0.1.0]: https://github.com/shimondoodkin/tinylb/releases/tag/v0.1.0
