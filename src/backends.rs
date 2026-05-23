@@ -207,10 +207,34 @@ impl BackendRegistry {
     }
 
     /// Find a backend group by Host header value (strips port if present).
+    /// Tries exact match first, then falls back to the longest-suffix wildcard.
     pub fn find_group(&self, host: &str) -> Option<Arc<BackendGroup>> {
-        let host = host.split(':').next().unwrap_or(host);
+        let host = host
+            .split(':')
+            .next()
+            .unwrap_or(host)
+            .to_ascii_lowercase();
         let groups = self.groups.read().unwrap();
-        groups.iter().find(|g| g.host == host).cloned()
+
+        // 1. Exact match wins.
+        if let Some(g) = groups.iter().find(|g| match &g.match_kind {
+            HostMatch::Exact(h) => h == &host,
+            _ => false,
+        }) {
+            return Some(g.clone());
+        }
+
+        // 2. Longest-suffix wildcard match.
+        groups
+            .iter()
+            .filter_map(|g| match &g.match_kind {
+                HostMatch::Wildcard { suffix } if host.ends_with(suffix.as_str()) => {
+                    Some((suffix.len(), g))
+                }
+                _ => None,
+            })
+            .max_by_key(|(len, _)| *len)
+            .map(|(_, g)| Arc::clone(g))
     }
 
     /// Apply a new configuration with routes.
@@ -282,6 +306,18 @@ impl Drop for ConnectionGuard {
 mod tests {
     use super::*;
 
+    fn route(host: &str) -> RouteConfig {
+        RouteConfig {
+            host: host.to_string(),
+            backends: vec![],
+        }
+    }
+
+    fn registry(hosts: &[&str]) -> BackendRegistry {
+        let routes: Vec<RouteConfig> = hosts.iter().map(|h| route(h)).collect();
+        BackendRegistry::new(&routes).unwrap()
+    }
+
     #[test]
     fn parse_exact_host() {
         let m = HostMatch::parse("example.com").unwrap();
@@ -343,6 +379,87 @@ mod tests {
         };
         let g = BackendGroup::new(&route).unwrap();
         assert!(matches!(g.match_kind, HostMatch::Wildcard { ref suffix } if suffix == ".example.com"));
+    }
+
+    #[test]
+    fn find_exact_match() {
+        let r = registry(&["example.com"]);
+        assert_eq!(r.find_group("example.com").unwrap().host, "example.com");
+    }
+
+    #[test]
+    fn find_exact_match_strips_port() {
+        let r = registry(&["example.com"]);
+        assert_eq!(r.find_group("example.com:8443").unwrap().host, "example.com");
+    }
+
+    #[test]
+    fn find_exact_match_is_case_insensitive() {
+        let r = registry(&["example.com"]);
+        assert_eq!(r.find_group("Example.COM").unwrap().host, "example.com");
+    }
+
+    #[test]
+    fn find_no_match_returns_none() {
+        let r = registry(&["example.com"]);
+        assert!(r.find_group("other.com").is_none());
+    }
+
+    #[test]
+    fn wildcard_matches_single_label_subdomain() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(r.find_group("foo.example.com").unwrap().host, "*.example.com");
+    }
+
+    #[test]
+    fn wildcard_matches_multi_label_subdomain() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(r.find_group("a.b.example.com").unwrap().host, "*.example.com");
+    }
+
+    #[test]
+    fn wildcard_does_not_match_apex() {
+        let r = registry(&["*.example.com"]);
+        assert!(r.find_group("example.com").is_none());
+    }
+
+    #[test]
+    fn wildcard_does_not_match_suffix_without_dot_boundary() {
+        let r = registry(&["*.example.com"]);
+        assert!(r.find_group("notexample.com").is_none());
+    }
+
+    #[test]
+    fn exact_wins_over_wildcard() {
+        let r = registry(&["*.example.com", "foo.example.com"]);
+        assert_eq!(r.find_group("foo.example.com").unwrap().host, "foo.example.com");
+    }
+
+    #[test]
+    fn longest_suffix_wildcard_wins() {
+        let r = registry(&["*.example.com", "*.api.example.com"]);
+        assert_eq!(
+            r.find_group("x.api.example.com").unwrap().host,
+            "*.api.example.com"
+        );
+    }
+
+    #[test]
+    fn wildcard_match_is_case_insensitive() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(
+            r.find_group("Foo.Example.COM").unwrap().host,
+            "*.example.com"
+        );
+    }
+
+    #[test]
+    fn wildcard_match_strips_port() {
+        let r = registry(&["*.example.com"]);
+        assert_eq!(
+            r.find_group("foo.example.com:8443").unwrap().host,
+            "*.example.com"
+        );
     }
 }
 
