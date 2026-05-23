@@ -49,3 +49,14 @@ drain = false
 # host = "api.example.com"
 # [[routes.backends]]
 # url = "http://api-backend:3000"
+
+# Wildcard subdomain route. A leading "*." matches one or more sub-labels:
+# "*.example.com" matches "foo.example.com" and "a.b.example.com" but NOT
+# the bare apex "example.com" (define a separate route for that if needed).
+# Exact routes win over wildcards; among wildcards, the longest suffix wins.
+# Your TLS cert must cover the wildcard (e.g. Let's Encrypt *.example.com).
+#
+# [[routes]]
+# host = "*.example.com"
+# [[routes.backends]]
+# url = "http://wildcard-backend:8080"

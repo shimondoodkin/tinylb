@@ -100,7 +100,7 @@ Open `http://localhost:8080/_lb/` for the stats dashboard.
 
 | Field | Required | Description |
 |---|---|---|
-| `host` | yes | The HTTP `Host:` header value to match. Port is stripped before comparison. |
+| `host` | yes | The HTTP `Host:` header value to match. Port is stripped before comparison. May start with `*.` for wildcard subdomain matching (e.g. `*.example.com` matches `foo.example.com` and `a.b.example.com`, but not the bare apex). Exact matches win over wildcards; longest wildcard suffix wins among wildcards. |
 | `backends` | yes | One or more `[[routes.backends]]` blocks |
 
 ### `[[routes.backends]]`
