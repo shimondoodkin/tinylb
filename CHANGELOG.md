@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-04
+
+### Fixed
+- WebSocket proxying dropped the request path when dialing the backend: an
+  incoming `/voice` upgrade was forwarded to `ws://backend:port` (root) instead
+  of `ws://backend:port/voice`. Backends whose WS route wasn't at `/` rejected
+  the handshake (returning a normal HTTP 200/4xx instead of 101), surfacing as
+  `Failed to connect to backend WebSocket … error=HTTP error: 200 OK`. The
+  proxy now preserves the original request path+query for the backend dial,
+  mirroring the HTTP proxy path handling.
+
 ## [0.2.0] — 2026-05-23
 
 ### Added

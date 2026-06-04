@@ -350,6 +350,13 @@ async fn handle_request(
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
+        // Preserve the request path+query for the backend WebSocket dial.
+        let path_and_query = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_string())
+            .unwrap_or_else(|| "/".to_string());
+
         let mut response_builder = Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .header("Upgrade", "websocket")
@@ -367,7 +374,7 @@ async fn handle_request(
         tokio::spawn(async move {
             match hyper::upgrade::on(&mut req).await {
                 Ok(upgraded) => {
-                    proxy::proxy_websocket(upgraded, backend, client_ip, existing_xff).await;
+                    proxy::proxy_websocket(upgraded, backend, client_ip, existing_xff, path_and_query).await;
                 }
                 Err(e) => {
                     error!(error = %e, "WebSocket upgrade failed");

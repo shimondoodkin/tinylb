@@ -22,15 +22,36 @@ pub async fn proxy_websocket(
     backend: Arc<Backend>,
     client_ip: String,
     existing_xff: Option<String>,
+    path_and_query: String,
 ) {
     // RAII guard: increments on creation, decrements on drop
     let _guard = ConnectionGuard::new(Arc::clone(&backend));
 
-    // Convert http(s):// to ws(s):// for the WebSocket client
-    let backend_url = backend
-        .url
-        .replace("http://", "ws://")
-        .replace("https://", "wss://");
+    // Build the backend WebSocket URL from the backend's scheme+authority and the
+    // ORIGINAL request path+query (mirrors http_proxy). Without this the request
+    // path is lost and the backend is dialed at "/", which breaks any WS route
+    // whose path isn't "/".
+    let backend_uri: hyper::Uri = match backend.url.parse() {
+        Ok(u) => u,
+        Err(e) => {
+            error!(backend = %backend.url, error = %e, "Invalid backend URL");
+            backend.error_count.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    };
+    let ws_scheme = match backend_uri.scheme_str() {
+        Some("https") | Some("wss") => "wss",
+        _ => "ws",
+    };
+    let authority = match backend_uri.authority() {
+        Some(a) => a.clone(),
+        None => {
+            error!(backend = %backend.url, "Backend URL has no authority");
+            backend.error_count.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    };
+    let backend_url = format!("{}://{}{}", ws_scheme, authority, path_and_query);
 
     // Build the backend request with X-Forwarded-For
     let mut request = match backend_url.as_str().into_client_request() {
