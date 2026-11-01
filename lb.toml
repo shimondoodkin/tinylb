@@ -25,6 +25,18 @@ timeout_secs = 3
 # After a backend is marked unhealthy, wait this long before retrying.
 unhealthy_cooldown_secs = 15
 
+# Logging (optional section — all fields have defaults).
+# [log]
+# Write the log to a file instead of stdout. tinylb rotates it itself by size,
+# so no logrotate is needed (e.g. in Docker). Restart required to change.
+# file = "/var/log/tinylb/tinylb.log"
+# max_size_mb = 50          # rotate at this size
+# max_files = 3             # keep tinylb.log.1 .. .3 (0 = just truncate)
+# Errors that repeat per request (backend down, connect refused, no healthy
+# backend) are logged once, then once per this many seconds with a
+# suppressed=N count. 0 = log every error. Hot-reloadable.
+# error_summary_secs = 60
+
 # One [[routes]] block per Host header you want to handle.
 # Requests whose Host header doesn't match any route get 404.
 

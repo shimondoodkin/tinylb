@@ -111,6 +111,17 @@ Open `http://localhost:8080/_lb/` for the stats dashboard.
 | `max_connections` | `5000` | Hard cap on concurrent connections per backend |
 | `drain` | `false` | If true, no new connections are routed here; existing connections finish naturally |
 
+### `[log]` (optional)
+
+| Field | Default | Description |
+|---|---|---|
+| `file` | — (stdout) | Write the log to this file instead of stdout. tinylb rotates it itself (no logrotate needed, e.g. inside Docker). Parent dirs are created. |
+| `max_size_mb` | `50` | Rotate when the file reaches this size: `tinylb.log` → `tinylb.log.1` → … |
+| `max_files` | `3` | Rotated files to keep. Disk use is capped at about `max_size_mb × (max_files + 1)`. `0` = just truncate. |
+| `error_summary_secs` | `60` | Errors that repeat on every request (backend down, connect refused, no healthy backend) are logged once, then once per this many seconds with a `suppressed=N` count, plus one "succeeding again" line on recovery. `0` = log every error. |
+
+Log verbosity is set with `RUST_LOG` (default `tinylb=info`).
+
 ## Hot reload
 
 tinylb reloads on either trigger:
@@ -123,9 +134,11 @@ tinylb reloads on either trigger:
 - `max_connections`
 - `drain` flag
 - TLS certificates (re-read from disk; new handshakes use the new cert immediately, existing TLS connections continue)
+- `log.error_summary_secs`
 
 **Requires restart:**
 - `server.bind`
+- `log.file`, `log.max_size_mb`, `log.max_files`
 - `server.tls_cert` / `tls_key` *paths* (the file contents reload; only changing the path itself needs a restart)
 
 ## Drain mode and rolling deploys

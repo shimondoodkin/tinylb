@@ -1,8 +1,10 @@
 mod backends;
 mod config;
 mod http_proxy;
+mod logfile;
 mod proxy;
 mod stats;
+mod throttle;
 mod tls;
 
 use std::net::SocketAddr;
@@ -21,21 +23,50 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use backends::BackendRegistry;
 use config::LbConfig;
 use stats::Stats;
+use throttle::ErrorThrottle;
 use tls::ReloadableCertResolver;
 
-fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "tinylb=info".into()),
-        )
-        .init();
+/// Process-wide throttles for errors that aren't tied to one backend.
+static ACCEPT_ERRORS: ErrorThrottle = ErrorThrottle::new();
+static CONN_ERRORS: ErrorThrottle = ErrorThrottle::new();
+static UPGRADE_ERRORS: ErrorThrottle = ErrorThrottle::new();
 
+fn env_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "tinylb=info".into())
+}
+
+/// Initialize logging: to a self-rotating file if `[log] file` is set,
+/// otherwise to stdout.
+fn init_logging(log: &config::LogConfig) {
+    throttle::set_window_secs(log.error_summary_secs);
+    if let Some(path) = &log.file {
+        match logfile::RotatingFile::new(
+            path,
+            log.max_size_mb.saturating_mul(1024 * 1024),
+            log.max_files,
+        ) {
+            Ok(writer) => {
+                tracing_subscriber::fmt()
+                    .with_env_filter(env_filter())
+                    .with_ansi(false)
+                    .with_writer(writer)
+                    .init();
+                return;
+            }
+            Err(e) => {
+                eprintln!("tinylb: cannot open log file {}: {} (logging to stdout)", path, e);
+            }
+        }
+    }
+    tracing_subscriber::fmt().with_env_filter(env_filter()).init();
+}
+
+fn main() {
     // Install the default rustls crypto provider (ring)
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -47,10 +78,13 @@ fn main() {
     let initial_config = match LbConfig::load(&config_path) {
         Ok(c) => c,
         Err(e) => {
+            tracing_subscriber::fmt().with_env_filter(env_filter()).init();
             error!(path = %config_path.display(), error = %e, "Failed to load config");
             std::process::exit(1);
         }
     };
+
+    init_logging(&initial_config.log);
 
     info!(
         bind = %initial_config.server.bind,
@@ -163,7 +197,7 @@ async fn accept_loop_tls(
         let (tcp_stream, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                error!(error = %e, "Failed to accept TCP connection");
+                accept_error_backoff(e).await;
                 continue;
             }
         };
@@ -207,11 +241,19 @@ async fn accept_loop_tls(
                     && !msg.contains("connection reset")
                     && !msg.contains("broken pipe")
                 {
-                    error!(error = %e, "HTTP connection error");
+                    throttled!(CONN_ERRORS, error, error = %e, "HTTP connection error");
                 }
             }
         });
     }
+}
+
+/// Called when `accept()` fails. Logs (throttled) and pauses briefly: errors
+/// like EMFILE ("too many open files") return instantly, so retrying without
+/// a pause spins the CPU and floods the log.
+async fn accept_error_backoff(e: std::io::Error) {
+    throttled!(ACCEPT_ERRORS, error, error = %e, "Failed to accept TCP connection");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 }
 
 /// Accept loop without TLS (plaintext).
@@ -225,7 +267,7 @@ async fn accept_loop_plain(
         let (stream, peer_addr) = match listener.accept().await {
             Ok(v) => v,
             Err(e) => {
-                error!(error = %e, "Failed to accept TCP connection");
+                accept_error_backoff(e).await;
                 continue;
             }
         };
@@ -257,7 +299,7 @@ async fn accept_loop_plain(
             {
                 let msg = e.to_string();
                 if !msg.contains("early eof") && !msg.contains("connection reset") {
-                    error!(error = %e, "HTTP connection error");
+                    throttled!(CONN_ERRORS, error, error = %e, "HTTP connection error");
                 }
             }
         });
@@ -317,7 +359,7 @@ async fn handle_request(
     let backend = match group.select_backend() {
         Some(b) => b,
         None => {
-            warn!(client = %peer, host = %host, "No healthy backend available");
+            throttled!(group.no_backend, warn, client = %peer, host = %host, "No healthy backend available");
             let resp = Response::builder()
                 .status(StatusCode::SERVICE_UNAVAILABLE)
                 .body(empty_body())
@@ -326,9 +368,13 @@ async fn handle_request(
         }
     };
 
+    if let Some(suppressed) = group.no_backend.on_success() {
+        info!(host = %host, suppressed, "Healthy backend available again");
+    }
+
     // WebSocket upgrade or plain HTTP — every route handles both
     if is_websocket_upgrade(&req) {
-        info!(
+        debug!(
             client = %peer,
             backend = %backend.url,
             active = backend.active_connections.load(std::sync::atomic::Ordering::Relaxed),
@@ -377,7 +423,7 @@ async fn handle_request(
                     proxy::proxy_websocket(upgraded, backend, client_ip, existing_xff, path_and_query).await;
                 }
                 Err(e) => {
-                    error!(error = %e, "WebSocket upgrade failed");
+                    throttled!(UPGRADE_ERRORS, error, error = %e, "WebSocket upgrade failed");
                 }
             }
         });
@@ -597,6 +643,7 @@ async fn config_reload_loop(
         info!("Reloading configuration ({})", reason);
 
         if let Some(new_config) = config::reload_config(config_path) {
+            throttle::set_window_secs(new_config.log.error_summary_secs);
             if let Err(e) = registry.apply_config(&new_config.routes) {
                 error!(error = %e, "Failed to apply new route configuration; keeping previous");
             }
