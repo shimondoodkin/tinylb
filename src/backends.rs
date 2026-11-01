@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use crate::config::{BackendConfig, HealthConfig, RouteConfig};
+use crate::throttle::ErrorThrottle;
 
 /// A single backend instance.
 pub struct Backend {
@@ -16,6 +17,10 @@ pub struct Backend {
     /// Errors since last stats sample. Incremented atomically, reset by stats loop.
     pub error_count: AtomicUsize,
     pub last_health_check: Mutex<Instant>,
+    /// Throttles per-request HTTP proxy error logs for this backend.
+    pub http_errors: ErrorThrottle,
+    /// Throttles per-connection WebSocket dial error logs for this backend.
+    pub ws_errors: ErrorThrottle,
 }
 
 impl Backend {
@@ -28,6 +33,8 @@ impl Backend {
             active_connections: AtomicUsize::new(0),
             error_count: AtomicUsize::new(0),
             last_health_check: Mutex::new(Instant::now()),
+            http_errors: ErrorThrottle::new(),
+            ws_errors: ErrorThrottle::new(),
         }
     }
 
@@ -102,6 +109,8 @@ pub struct BackendGroup {
     pub host: String,
     pub match_kind: HostMatch,
     pub backends: RwLock<Vec<Arc<Backend>>>,
+    /// Throttles "No healthy backend available" logs for this route.
+    pub no_backend: ErrorThrottle,
 }
 
 impl BackendGroup {
@@ -116,6 +125,7 @@ impl BackendGroup {
             host: route.host.clone(),
             match_kind,
             backends: RwLock::new(backends),
+            no_backend: ErrorThrottle::new(),
         })
     }
 

@@ -9,7 +9,7 @@ use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::{Body, Frame, Incoming};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::Client;
-use tracing::{debug, error};
+use tracing::{debug, info};
 
 use crate::backends::{Backend, ConnectionGuard};
 
@@ -70,7 +70,7 @@ pub async fn proxy_http(
     let backend_uri: hyper::Uri = match backend.url.parse() {
         Ok(u) => u,
         Err(e) => {
-            error!(backend = %backend.url, error = %e, "Invalid backend URL");
+            crate::throttled!(backend.http_errors, error, backend = %backend.url, error = %e, "Invalid backend URL");
             backend.error_count.fetch_add(1, Ordering::Relaxed);
             let resp = Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
@@ -84,7 +84,7 @@ pub async fn proxy_http(
     let authority = match backend_uri.authority() {
         Some(a) => a.clone(),
         None => {
-            error!(backend = %backend.url, "Backend URL has no authority");
+            crate::throttled!(backend.http_errors, error, backend = %backend.url, "Backend URL has no authority");
             backend.error_count.fetch_add(1, Ordering::Relaxed);
             let resp = Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
@@ -151,6 +151,9 @@ pub async fn proxy_http(
 
     match client.request(proxy_req).await {
         Ok(resp) => {
+            if let Some(suppressed) = backend.http_errors.on_success() {
+                info!(backend = %backend.url, suppressed, "Backend requests succeeding again");
+            }
             let (parts, body) = resp.into_parts();
 
             // Wrap body with the connection guard so it stays alive
@@ -171,7 +174,9 @@ pub async fn proxy_http(
             Ok(resp)
         }
         Err(e) => {
-            error!(
+            crate::throttled!(
+                backend.http_errors,
+                error,
                 backend = %backend.url,
                 error = %e,
                 "Failed to proxy request to backend"

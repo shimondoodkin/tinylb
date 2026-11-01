@@ -7,7 +7,7 @@ use hyper_util::rt::TokioIo;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::{connect_async, WebSocketStream};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::backends::{Backend, ConnectionGuard};
 
@@ -34,7 +34,7 @@ pub async fn proxy_websocket(
     let backend_uri: hyper::Uri = match backend.url.parse() {
         Ok(u) => u,
         Err(e) => {
-            error!(backend = %backend.url, error = %e, "Invalid backend URL");
+            crate::throttled!(backend.ws_errors, error, backend = %backend.url, error = %e, "Invalid backend URL");
             backend.error_count.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -46,7 +46,7 @@ pub async fn proxy_websocket(
     let authority = match backend_uri.authority() {
         Some(a) => a.clone(),
         None => {
-            error!(backend = %backend.url, "Backend URL has no authority");
+            crate::throttled!(backend.ws_errors, error, backend = %backend.url, "Backend URL has no authority");
             backend.error_count.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -57,7 +57,7 @@ pub async fn proxy_websocket(
     let mut request = match backend_url.as_str().into_client_request() {
         Ok(r) => r,
         Err(e) => {
-            error!(backend = %backend_url, error = %e, "Failed to build backend request");
+            crate::throttled!(backend.ws_errors, error, backend = %backend_url, error = %e, "Failed to build backend request");
             backend.error_count.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -75,10 +75,17 @@ pub async fn proxy_websocket(
 
     // Connect to backend with custom request
     let backend_ws = match connect_async(request).await {
-        Ok((ws, _resp)) => ws,
+        Ok((ws, _resp)) => {
+            if let Some(suppressed) = backend.ws_errors.on_success() {
+                info!(backend = %backend.url, suppressed, "Backend WebSocket connections succeeding again");
+            }
+            ws
+        }
         Err(e) => {
-            error!(
-                backend = %backend_url,
+            crate::throttled!(
+                backend.ws_errors,
+                error,
+                backend = %backend.url,
                 error = %e,
                 "Failed to connect to backend WebSocket"
             );
