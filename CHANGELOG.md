@@ -6,6 +6,28 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `[log]` config section. `file` makes tinylb write its log to a file and
+  rotate it by size itself (`max_size_mb`, default 50; `max_files`, default 3),
+  for containers with no logrotate.
+
+### Fixed
+- Log flood when a backend fails: every failed request or WebSocket
+  reconnect logged an error line, so a broken backend (e.g. out of disk)
+  could grow the log by gigabytes. Repeated per-request errors (proxy
+  failures, WS connect failures, "No healthy backend available", HTTP
+  connection errors) are now logged once and then summarized once per
+  `log.error_summary_secs` (default 60s, `0` = log all) with a `suppressed`
+  count, plus one line when the backend recovers.
+- `accept()` errors such as EMFILE (too many open files) retried in a tight
+  loop with no pause, pinning a CPU and flooding the log. tinylb now pauses
+  100ms after an accept error, and those log lines are throttled too.
+
+### Changed
+- "Routing WebSocket connection" is now logged at debug level, since it was
+  written for every reconnect attempt. "WebSocket proxy session started" is
+  still logged at info once the backend connects.
+
 ## [0.2.1] — 2026-06-04
 
 ### Fixed
