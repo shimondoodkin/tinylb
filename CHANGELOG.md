@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-11-01
+
 ### Added
 - `[log]` config section. `file` makes tinylb write its log to a file and
   rotate it by size itself (`max_size_mb`, default 50; `max_files`, default 3),
@@ -68,6 +70,8 @@ where it has been running in production for several months.
 - Stats JSON endpoint at `/_lb/stats` and HTML dashboard at `/_lb/`.
 - Release binaries for Linux x86_64 (glibc and static-musl) and Windows x86_64.
 
-[Unreleased]: https://github.com/shimondoodkin/tinylb/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/shimondoodkin/tinylb/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/shimondoodkin/tinylb/releases/tag/v0.2.2
+[0.2.1]: https://github.com/shimondoodkin/tinylb/releases/tag/v0.2.1
 [0.2.0]: https://github.com/shimondoodkin/tinylb/releases/tag/v0.2.0
 [0.1.0]: https://github.com/shimondoodkin/tinylb/releases/tag/v0.1.0
